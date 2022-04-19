@@ -31,7 +31,8 @@ object MyKafkaUtils {
     val producerParams = new util.HashMap[String, AnyRef]();
     // 将配置参数 put 到 配置对象中
     // kafka的集群地址
-    producerParams.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "hadoop102:9092,hadoop103:9092,hadoop104:9092");
+//    producerParams.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, "hadoop102:9092,hadoop103:9092,hadoop104:9092")
+    producerParams.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, MyPropsUtils(MyConfig.KAFKA_BROKER_LIST))
     // kv 的 序列化
     producerParams.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
     producerParams.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
@@ -77,7 +78,7 @@ object MyKafkaUtils {
    *   kafka 作为数据源：KafkaUtils.createDirectStream()
    *   获取到的DStream 对象即为 需要消费的数据
    */
-  def getKafkaDStream1(ssc : StreamingContext, topic : String, groupID : String) = {
+  def getKafkaDStream(ssc : StreamingContext, topic : String, groupID : String) = {
     // 消费者组 配置，通过外部指定
     consumerParams.put(ConsumerConfig.GROUP_ID_CONFIG, groupID);
     // 通过 KafkaUtils获取 DStream 对象
