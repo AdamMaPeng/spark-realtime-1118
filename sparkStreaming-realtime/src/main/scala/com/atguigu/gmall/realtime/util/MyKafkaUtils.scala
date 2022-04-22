@@ -4,6 +4,7 @@ import java.util
 
 import org.apache.kafka.clients.consumer.{ConsumerConfig, ConsumerRecord}
 import org.apache.kafka.clients.producer.{KafkaProducer, ProducerConfig, ProducerRecord}
+import org.apache.kafka.common.TopicPartition
 import org.apache.spark.streaming.StreamingContext
 import org.apache.spark.streaming.dstream.InputDStream
 import org.apache.spark.streaming.kafka010.{ConsumerStrategies, KafkaUtils, LocationStrategies}
@@ -56,6 +57,13 @@ object MyKafkaUtils {
   }
 
   /**
+  *  生产者发送数据 ： flush 操作
+   */
+  def flush(): Unit ={
+    producer.flush()
+  }
+
+  /**
   *  消费者的 配置
    */
   val consumerParams: mutable.Map[String, Object] = mutable.Map[String, Object](
@@ -86,6 +94,21 @@ object MyKafkaUtils {
       ssc,
       LocationStrategies.PreferConsistent,
       ConsumerStrategies.Subscribe[String, String](Array(topic), consumerParams)
+    )
+    kafkaDStream
+  }
+
+  /**
+  *  指定 offset 进行消费
+   */
+  def getKafkaDStream(ssc : StreamingContext, topic : String, groupID : String, offsets: Map[TopicPartition, Long]) = {
+    // 消费者组 配置，通过外部指定
+    consumerParams.put(ConsumerConfig.GROUP_ID_CONFIG, groupID);
+    // 通过 KafkaUtils获取 DStream 对象
+    val kafkaDStream: InputDStream[ConsumerRecord[String, String]] = KafkaUtils.createDirectStream(
+      ssc,
+      LocationStrategies.PreferConsistent,
+      ConsumerStrategies.Subscribe[String, String](Array(topic), consumerParams, offsets)
     )
     kafkaDStream
   }
