@@ -12,4 +12,7 @@ package com.atguigu.gmall.realtime.util
  */
 object MyConfig {
   val KAFKA_BROKER_LIST = "kafka.broker.list"
+
+  val REDIS_HOST="redis.host"
+  val REDIS_PORT="redis.port"
 }
