@@ -10,14 +10,7 @@ import scala.collection.mutable
 
 /**
  *  @author Adam-Ma 
- *  @date 2022/4/22 13:56
- *  @Project spark-realtime-1118
- *  @email Adam_Ma520@outlook.com
- *  @phone 18852895353
- */
-/**
- *  @author Adam-Ma
- *  @date 2022/4/21 19:38
+ *  @date 2022/4/22 13:57
  *  @Project spark-realtime-1118
  *  @email Adam_Ma520@outlook.com
  *  @phone 18852895353
@@ -50,7 +43,8 @@ import scala.collection.mutable
  *
  *        3、offset 的
  */
-object MyOffsetUtil {
+
+object MyOffsetUtils {
   // 存 offset 到 Redis
   /**
    *  问题：
@@ -69,7 +63,7 @@ object MyOffsetUtil {
    *         是否过期： 不过期
    *
    */
-  def saveOffset(topic: String , groupId: String ,offsetRanges: Array[OffsetRange]): Unit ={
+  def saveoffset(topic: String , groupId: String ,offsetRanges: Array[OffsetRange]): Unit ={
     // 对 offsetRanges 进行判断
     if( offsetRanges != null && offsetRanges.length > 0) {
       // 将 offset 作为 value 保存到 Redis 中
@@ -80,6 +74,7 @@ object MyOffsetUtil {
         offsets.put(partition.toString,untilOffset.toString)
       }
 
+      println("保存的offset 为：" + offsets)
       // 获取 Redis 实例
       val jedis: Jedis = MyRedisUtils.getJedisFromPool()
       // 拼接 key
@@ -107,6 +102,9 @@ object MyOffsetUtil {
     // 获取 offset 对象
     val offsetValues: util.Map[String, String] = jedis.hgetAll(offsetKey)
 
+    // 测试读取成功
+    println("读取的offset 为：" + offsetValues)
+
     // 将获取到的 util.Map 转换成 SparkStreaming 消费数据时能够正常识别的 Map[TopicPartition, Long]
     val offsetMap: mutable.Map[TopicPartition, Long] = mutable.Map[TopicPartition, Long]()
     // 将 java 中的 map 转换成 scala 中的map
@@ -119,4 +117,3 @@ object MyOffsetUtil {
     offsetMap.toMap
   }
 }
-
