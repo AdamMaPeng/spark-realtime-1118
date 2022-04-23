@@ -8,6 +8,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.spark
 import org.apache.spark.SparkConf
+import org.apache.spark.broadcast.Broadcast
 import org.apache.spark.streaming.StreamingContext
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
 import org.apache.spark.streaming.kafka010.{HasOffsetRanges, OffsetRange}
@@ -127,9 +128,13 @@ object OdsBaseDBApp {
         val jedis1 : Jedis = MyRedisUtils.getJedisFromPool()
         // 事实表清单
         val factTables: util.Set[String] = jedis1.smembers(factKey)
+        // 由于factTable需要从Driver 端发送到Executor ，真实环境上，数据量较大，所以考虑做成广播变量
+        val factTableBC: Broadcast[util.Set[String]] = ssc.sparkContext.broadcast(factTables)
         println("factTables : " + factTables)
         // 维度表清单
         val dimTables:  util.Set[String] = jedis1.smembers(dimKey)
+        // 将dimTables 也做成广播变量
+        val dimTableBC: Broadcast[util.Set[String]] = ssc.sparkContext.broadcast(dimTables)
         println("dimTables ：" + dimTables)
         // 关闭Jedis 连接
         MyRedisUtils.closeJedis(jedis1)
@@ -156,7 +161,7 @@ object OdsBaseDBApp {
                 val data: JSONObject = jsonObj.getJSONObject("data")
 
                   // 事实数据
-                if (factTables.contains(tableName)){
+                if (factTableBC.value.contains(tableName)){
                   // 例如： DWD_ORDER_INFO_I_1118  DWD_ORDER_INFO_U_1118 DWD_ORDER_INFO_D_1118
                   val dwdTopicName:String = s"DWD_${tableName.toUpperCase}_${opValue}_1118"
                   //分流数据
@@ -164,7 +169,7 @@ object OdsBaseDBApp {
                 }
 
                   // 维度数据 : 分流到 Redis
-                if(dimTables.contains(tableName)){
+                if(dimTableBC.value.contains(tableName)){
                   /*
                       存入 Redis 中的类型： string    hash
                           // hash  ： 整个表存成一个hash ， 要考虑目前数据量大小和将来数据量增长 及 高频访问问题
