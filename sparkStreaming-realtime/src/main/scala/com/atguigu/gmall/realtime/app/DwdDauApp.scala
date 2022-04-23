@@ -2,13 +2,14 @@ package com.atguigu.gmall.realtime.app
 
 import com.alibaba.fastjson.JSON
 import com.atguigu.gmall.realtime.bean.PageLog
-import com.atguigu.gmall.realtime.util.{MyKafkaUtils, MyOffsetUtils}
+import com.atguigu.gmall.realtime.util.{MyKafkaUtils, MyOffsetUtils, MyRedisUtils}
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.spark.streaming.StreamingContext
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
 import org.apache.spark.streaming.kafka010.{HasOffsetRanges, OffsetRange}
 import org.apache.spark.{SparkConf, streaming}
+import redis.clients.jedis.Jedis
 
 /**
  *  @author Adam-Ma 
@@ -94,6 +95,33 @@ object DwdDauApp {
       rdd => {
         println("自我审查后的数据量： " + rdd.count())
         println("*" * 150)
+      }
+    )
+
+    // 5.3 第三方审查： 通过Redis 将当日活跃的mid 维护起来，自我审查后的每条数据需要到redis 中进行对比去重
+    /*
+      存储的类型 ：   string
+      key       ：   DAU:MID
+      value     :    JsonObjStr
+      写入API    :    setnx
+      读取API    :    get
+      是否过期	  ：   不过期
+     */
+
+    filterDStream.foreachRDD(
+      rdd => {
+        rdd.foreachPartition(
+          pageLogIter =>{
+            val jedis: Jedis = MyRedisUtils.getJedisFromPool()
+
+            for (pageLog <- pageLogIter) {
+               val dauRedisKey: String = "DAU:" + pageLog.mid
+               jedis.setnx(dauRedisKey,pageLog.toString)
+            }
+            // 关闭 jedis 连接
+            MyRedisUtils.closeJedis(jedis)
+          }
+        )
       }
     )
 
