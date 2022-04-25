@@ -2,14 +2,13 @@ package com.atguigu.gmall.realtime.app
 
 import com.alibaba.fastjson.JSON
 import com.atguigu.gmall.realtime.bean.PageLog
-import com.atguigu.gmall.realtime.util.{MyKafkaUtils, MyOffsetUtils, MyRedisUtils}
+import com.atguigu.gmall.realtime.util.{MyKafkaUtils, MyOffsetUtils}
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.spark.streaming.StreamingContext
 import org.apache.spark.streaming.dstream.{DStream, InputDStream}
 import org.apache.spark.streaming.kafka010.{HasOffsetRanges, OffsetRange}
 import org.apache.spark.{SparkConf, streaming}
-import redis.clients.jedis.Jedis
 
 /**
  *  @author Adam-Ma 
@@ -80,7 +79,7 @@ object DwdDauApp {
 //    测试是否消费到 DWD_PAGE_LOG_TOPIC_1118 中的数据
 //    pageLogDStream.print(100)
     // 自我审查前
-    pageLogDStream.cache()
+    pageLogDStream.cache()    //  进行 cache 后，流就可以多次使用，如果不进行cache ，则只能使用一次
     pageLogDStream.foreachRDD(
       pageLog => println("自我审查前的数据量： " + pageLog.count())
     )
@@ -91,6 +90,7 @@ object DwdDauApp {
       pageLog => pageLog.last_page_id == null
     )
     // 自我审查后
+    filterDStream.cache()
     filterDStream.foreachRDD(
       rdd => {
         println("自我审查后的数据量： " + rdd.count())
@@ -98,32 +98,47 @@ object DwdDauApp {
       }
     )
 
+    /*  第三方去重 ： 自己的思路，无法实现
     // 5.3 第三方审查： 通过Redis 将当日活跃的mid 维护起来，自我审查后的每条数据需要到redis 中进行对比去重
-    /*
       存储的类型 ：   string
       key       ：   DAU:MID
       value     :    JsonObjStr
       写入API    :    setnx
       读取API    :    get
       是否过期	  ：   不过期
-     */
 
-    filterDStream.foreachRDD(
+    val secondFilterDStream: DStream[PageLog] = filterDStream.transform(
       rdd => {
         rdd.foreachPartition(
-          pageLogIter =>{
+          pageLogIter => {
             val jedis: Jedis = MyRedisUtils.getJedisFromPool()
 
             for (pageLog <- pageLogIter) {
-               val dauRedisKey: String = "DAU:" + pageLog.mid
-               jedis.setnx(dauRedisKey,pageLog.toString)
+              val dauRedisKey: String = "DAU:" + pageLog.mid
+              jedis.setnx(dauRedisKey, pageLog.toString)
             }
             // 关闭 jedis 连接
             MyRedisUtils.closeJedis(jedis)
           }
         )
+        rdd
       }
     )
+    secondFilterDStream.cache()
+    secondFilterDStream.filter(
+      PageLog => {
+        val jedis: Jedis = MyRedisUtils.getJedisFromPool()
+        jedis.get("DAU:" + PageLog.mid) != null
+      }
+    )
+
+    secondFilterDStream.foreachRDD(
+      rdd => {
+        println("第三方审查后的数据量： " + rdd.count())
+        println("*" * 150)
+      }
+    )
+  */
 
     // 开启 StreamingContext 环境
     ssc.start()
