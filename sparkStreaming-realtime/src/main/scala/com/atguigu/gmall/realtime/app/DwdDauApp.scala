@@ -2,11 +2,12 @@ package com.atguigu.gmall.realtime.app
 
 import java.lang
 import java.text.SimpleDateFormat
+import java.time.{LocalDate, Period}
 import java.util.Date
 
-import com.alibaba.fastjson.JSON
-import com.atguigu.gmall.realtime.bean.PageLog
-import com.atguigu.gmall.realtime.util.{MyKafkaUtils, MyOffsetUtils, MyRedisUtils}
+import com.alibaba.fastjson.{JSON, JSONObject}
+import com.atguigu.gmall.realtime.bean.{DauInfo, PageLog}
+import com.atguigu.gmall.realtime.util.{MyBeanUtils, MyKafkaUtils, MyOffsetUtils, MyRedisUtils}
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.common.TopicPartition
 import org.apache.spark.streaming.StreamingContext
@@ -93,11 +94,12 @@ object DwdDauApp {
     )
     
     // 5.2 去重 ：
+    // 5.2.1 自我审查
     // 自我审查： 将 last_page_id != null (当前页面有上一级页面) 过滤掉，只保留每次访问的首页
     val filterDStream: DStream[PageLog] = pageLogDStream.filter(
       pageLog => pageLog.last_page_id == null
     )
-    // 自我审查后
+    // 自我审查后的数据量
     filterDStream.cache()
     filterDStream.foreachRDD(
       rdd => {
@@ -148,6 +150,7 @@ object DwdDauApp {
     )
   */
 
+    // 5.2.2 第三方审查
     /*
       第三方审查： 使用 Redis 来对同一个mid的多个 page页面进行去重，保留一个 mid，存储到Redis中，达到每日用户数的存储，记录到Redis 后，在将数据写入到 ES中
         类型     ：  list          |     set
@@ -221,6 +224,88 @@ object DwdDauApp {
         println("*" * 150)
       }
     })
+
+    // 5.3 维度关联
+    /*
+       将 pageLog 中的数据都取出来，存储到 DauInfo 中
+     */
+    val dauInfoStream: DStream[DauInfo] = redisFilterDStream.mapPartitions(
+      pageLogIter => {
+        // 创建 迭代器对象，用于 最终返回
+        val dauInfos: ListBuffer[DauInfo] = ListBuffer[DauInfo]()
+
+        // 开启Redis
+        val jedis: Jedis = MyRedisUtils.getJedisFromPool()
+
+        // 对 ts 进行格式化
+        val sdf: SimpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+
+        for (pageLog <- pageLogIter) {
+          // 创建 dauInfo  对象，用于接收 pageLog 中的数据
+          val dauInfo: DauInfo = new DauInfo()
+          // 1、将 pageLog 中已有的字段拷贝到DauInfo 中
+          //笨办法： 将 pageLog 中的每个字段的值挨个提取，赋值给dauInfo 中对应的字段
+          // 好办法 ： 通过对象拷贝来完成
+          // dauInfo 中 对应 pageLog 中的数据都已经取到
+          MyBeanUtils.copyField(pageLog, dauInfo)
+
+          // 2、部分维度
+          // 2.1 用户信息维度 ： 性别 + 年龄
+          val userId: String = pageLog.mid
+          // 从 Redis 中 通过 Key：DIM:${tableName}:${id} ，获取到 该用户的 data
+          val redisUserKey: String = s"DIM:USER_INFO:${userId}"
+          val userJson: String = jedis.get(redisUserKey)
+          val userJsonObj: JSONObject = JSON.parseObject(userJson)
+          // 获取性别
+          val gender: String = userJsonObj.getString("gender")
+          val birthday: String = userJsonObj.getString("birthday")
+          // 换算年龄
+          val birthdayLD: LocalDate = LocalDate.parse(birthday)
+          val nowLD: LocalDate = LocalDate.now()
+          val period: Period = Period.between(birthdayLD, nowLD)
+          val age: Int = period.getYears
+
+          // 将 用户的性别 + 年龄存储到 dauInfo 对象中
+          dauInfo.user_gender = gender
+          dauInfo.user_age = age.toString
+
+          // 2.2 地区信息维度: province_name 、province_iso_code、 province_3166_2、 province_area_code
+          val province_id: String = pageLog.province_id
+          val redisProvinceKey = s"DIM:BASE_PROVINCE_${province_id}"
+          val provinceJson: String = jedis.get(redisProvinceKey)
+          val provinceJsonObj: JSONObject = JSON.parseObject(provinceJson)
+          // 获取 province_name
+          val provinceName: String = provinceJsonObj.getString("name")
+          val provinceAreaCode: String = provinceJsonObj.getString("area_code")
+          val provinceIsoCode: String = provinceJsonObj.getString("iso_code")
+          val provinceIso3166: String = provinceJsonObj.getString("iso_3166_2")
+
+          //补充维度
+          dauInfo.province_name = provinceName
+          dauInfo.province_area_code = provinceAreaCode
+          dauInfo.province_iso_code = provinceIsoCode
+          dauInfo.province_3166_2 = provinceIso3166
+
+          // 2.3 日期字段处理
+          val dthr: String = sdf.format(new Date(pageLog.ts))
+          val dthrArr: Array[String] = dthr.split(" ")
+          val dt: String = dthrArr(0)
+          val hr: String = dthrArr(1).split(":")(0)
+
+          //补充维度
+          dauInfo.dt = dt
+          dauInfo.hr = hr
+
+          // 将处理完后的 dauInfo 追加到 dauInfos
+          dauInfos.append(dauInfo)
+        }
+
+        // 关闭 Jedis 连接
+        jedis.close()
+        dauInfos.toIterator
+      }
+    )
+    dauInfoStream
 
 
     // 开启 StreamingContext 环境
