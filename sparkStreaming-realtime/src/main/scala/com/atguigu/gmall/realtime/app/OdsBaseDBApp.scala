@@ -163,7 +163,7 @@ object OdsBaseDBApp {
                   // 事实数据
                 if (factTableBC.value.contains(tableName)){
                   // 例如： DWD_ORDER_INFO_I_1118  DWD_ORDER_INFO_U_1118 DWD_ORDER_INFO_D_1118
-                  val dwdTopicName:String = s"DWD_${tableName.toUpperCase}_${opValue}_1118"
+                  val dwdTopicName:String = s"DWD_${tableName.toUpperCase()}_${opValue}_1118"
                   //分流数据
                   MyKafkaUtils.send(dwdTopicName, data.toString())
                 }
@@ -184,7 +184,7 @@ object OdsBaseDBApp {
                   // 获取 data 中的id： 用于拼接 redis 的 key
                   val id: String = data.getString("id")
                   // 拼接 redis 中的 key
-                  val redisKey : String = s"DIM:${tableName}:${id}"
+                  val redisKey : String = s"DIM:${tableName.toUpperCase()}:${id}"
 
                   // TODO Redis开关很频繁：在此处每次开启关闭 Redis 连接，每条数据都需要对 Redis 开关
                   // 获取 Jedis 实例
